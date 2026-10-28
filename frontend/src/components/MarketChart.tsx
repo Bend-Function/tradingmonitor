@@ -25,6 +25,7 @@ type ChartSeries = {
   readonly sma: ISeriesApi<'Line'>;
   readonly ema: ISeriesApi<'Line'>;
   readonly rsi: ISeriesApi<'Line'>;
+  readonly cci: ISeriesApi<'Line'>;
 };
 
 type ChartPalette = {
@@ -38,6 +39,7 @@ type ChartPalette = {
   readonly sma: string;
   readonly ema: string;
   readonly rsi: string;
+  readonly cci: string;
   readonly fontFamily: string;
 };
 
@@ -53,6 +55,7 @@ export type MarketChartProps = {
   readonly visibility: IndicatorVisibility;
   readonly theme: Theme;
   readonly label: string;
+  readonly resetPriceScale?: number;
 };
 
 function cssValue(name: string): string {
@@ -71,6 +74,7 @@ function readPalette(): ChartPalette {
     sma: cssValue('--chart-sma'),
     ema: cssValue('--chart-ema'),
     rsi: cssValue('--chart-rsi'),
+    cci: cssValue('--chart-cci') || cssValue('--chart-rsi'),
     fontFamily: cssValue('--font-mono'),
   };
 }
@@ -101,6 +105,13 @@ function line(point: Point): LineData {
   return { time: timestamp(point.time), value: point.value };
 }
 
+function resetPriceScales(series: ChartSeries): void {
+  // SMA and EMA share the main price scale with the candles.
+  series.candles.priceScale().applyOptions({ autoScale: true });
+  series.rsi.priceScale().applyOptions({ autoScale: true });
+  series.cci.priceScale().applyOptions({ autoScale: true });
+}
+
 export function MarketChart({
   bars,
   datasetKey,
@@ -108,6 +119,7 @@ export function MarketChart({
   visibility,
   theme,
   label,
+  resetPriceScale = 0,
 }: MarketChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -166,6 +178,7 @@ export function MarketChart({
       },
       handleScale: {
         axisPressedMouseMove: true,
+        axisDoubleClickReset: true,
         mouseWheel: true,
         pinch: true,
       },
@@ -216,8 +229,17 @@ export function MarketChart({
       crosshairMarkerVisible: false,
       visible: false,
     });
+    const cci = chart.addSeries(LineSeries, {
+      color: palette.cci,
+      lineWidth: 2,
+      priceScaleId: 'cci',
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
     chartRef.current = chart;
-    seriesRef.current = { candles, volume: volumeSeries, sma, ema, rsi };
+    seriesRef.current = { candles, volume: volumeSeries, sma, ema, rsi, cci };
 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -266,6 +288,7 @@ export function MarketChart({
     series.sma.applyOptions({ color: palette.sma });
     series.ema.applyOptions({ color: palette.ema });
     series.rsi.applyOptions({ color: palette.rsi });
+    series.cci.applyOptions({ color: palette.cci });
   }, [theme]);
 
   useEffect(() => {
@@ -286,17 +309,22 @@ export function MarketChart({
     if (chart === null || series === null) return;
     const first = bars[0];
     const last = bars.at(-1);
+    const datasetChanged = candleKeyRef.current !== datasetKey;
     if (first === undefined || last === undefined) {
       series.candles.setData([]);
+      if (datasetChanged) resetPriceScales(series);
       candleKeyRef.current = datasetKey;
       firstCandleTimeRef.current = null;
       return;
     }
-    const keyChanged = candleKeyRef.current !== datasetKey || firstCandleTimeRef.current === null;
+    const keyChanged = datasetChanged || firstCandleTimeRef.current === null;
     const windowMoved = firstCandleTimeRef.current !== null && firstCandleTimeRef.current !== first.time;
     if (keyChanged || windowMoved) {
       series.candles.setData(bars.map(candle));
-      if (keyChanged) chart.timeScale().fitContent();
+      if (keyChanged) {
+        resetPriceScales(series);
+        chart.timeScale().fitContent();
+      }
     } else {
       series.candles.update(candle(last));
     }
@@ -317,23 +345,41 @@ export function MarketChart({
     series.sma.setData(visibility.sma ? computed.sma.map(line) : []);
     series.ema.setData(visibility.ema ? computed.ema.map(line) : []);
     series.rsi.setData(visibility.rsi ? computed.rsi.map(line) : []);
-  }, [computed, visibility.sma, visibility.ema, visibility.rsi]);
+    series.cci.setData(visibility.cci ? computed.cci.map(line) : []);
+  }, [computed, visibility.sma, visibility.ema, visibility.rsi, visibility.cci]);
 
   useEffect(() => {
     const chart = chartRef.current;
     const series = seriesRef.current;
     if (chart === null || series === null) return;
-    if (visibility.rsi) {
-      series.rsi.moveToPane(1);
-      series.rsi.applyOptions({ visible: true });
-      series.rsi.priceScale().applyOptions({ scaleMargins: { top: 0.15, bottom: 0.15 } });
-      const height = Number.parseFloat(cssValue('--rsi-pane-height'));
-      if (Number.isFinite(height)) chart.panes()[1]?.setHeight(height);
-    } else {
-      series.rsi.applyOptions({ visible: false });
-      series.rsi.moveToPane(0);
+    const oscillators = [
+      { series: series.rsi, visible: visibility.rsi },
+      { series: series.cci, visible: visibility.cci },
+    ];
+    let paneIndex = 1;
+    for (const oscillator of oscillators) {
+      if (!oscillator.visible) continue;
+      oscillator.series.moveToPane(paneIndex);
+      oscillator.series.applyOptions({ visible: true });
+      oscillator.series.priceScale().applyOptions({ scaleMargins: { top: 0.15, bottom: 0.15 } });
+      paneIndex += 1;
     }
-  }, [visibility.rsi]);
+    for (const oscillator of oscillators) {
+      if (oscillator.visible) continue;
+      oscillator.series.applyOptions({ visible: false });
+      oscillator.series.moveToPane(0);
+    }
+    series.candles.getPane().setStretchFactor(4);
+    for (const oscillator of oscillators) {
+      if (oscillator.visible) oscillator.series.getPane().setStretchFactor(1);
+    }
+  }, [visibility.rsi, visibility.cci]);
+
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (series === null) return;
+    series.candles.priceScale().applyOptions({ autoScale: true });
+  }, [resetPriceScale]);
 
   return <div ref={containerRef} className="market-chart" role="img" aria-label={label} />;
 }

@@ -1,4 +1,5 @@
-import { Maximize2, Minimize2, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { Maximize2, Minimize2, RotateCcw, Trash2 } from 'lucide-react';
 import { formatPrice, getInstrument, INTERVALS } from '../market';
 import type { Bar, Interval, Market } from '../market';
 import type { PanelConfig, Theme } from '../types';
@@ -37,6 +38,7 @@ export function ChartPanel({
   onToggleExpand,
   onRemove,
 }: ChartPanelProps) {
+  const [priceScaleReset, setPriceScaleReset] = useState(0);
   const instrument = getInstrument(panel.symbol);
   const first = bars[0];
   const last = bars.at(-1);
@@ -79,6 +81,15 @@ export function ChartPanel({
           <button
             type="button"
             className="icon-button"
+            onClick={() => setPriceScaleReset((current) => current + 1)}
+            aria-label="重置价格比例尺"
+            title="重置价格比例尺"
+          >
+            <RotateCcw />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
             onClick={onToggleExpand}
             aria-label={expanded ? '退出单图放大' : `放大 ${instrument.symbol} 图表`}
             title={expanded ? '退出放大（Esc）' : '单图放大'}
@@ -108,6 +119,12 @@ export function ChartPanel({
         {panel.indicators.sma && <span><i className="legend-line legend-line--sma" />SMA 20</span>}
         {panel.indicators.ema && <span><i className="legend-line legend-line--ema" />EMA 50</span>}
         {panel.indicators.rsi && <span><i className="legend-line legend-line--rsi" />RSI 14</span>}
+        {panel.indicators.cci && (
+          <span>
+            <i className="legend-line" style={{ background: 'var(--chart-cci, var(--chart-rsi))' }} />
+            CCI 20
+          </span>
+        )}
         {panel.indicators.volume && <span className="muted">VOL</span>}
       </div>
       <MarketChart
@@ -117,6 +134,7 @@ export function ChartPanel({
         visibility={panel.indicators}
         theme={theme}
         label={`${instrument.name} ${panel.interval} 模拟K线图，可拖动和平移缩放`}
+        resetPriceScale={priceScaleReset}
       />
     </section>
   );

@@ -14,7 +14,8 @@
     "lightweight-charts": "5.2.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-grid-layout": "2.3.0"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",

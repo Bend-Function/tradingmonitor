@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Check, FolderOpen, RotateCcw, Save, Search, X } from 'lucide-react';
 import { INSTRUMENTS } from '../market';
-import type { DashboardSettings } from '../types';
+import type { DashboardSettings, WorkspaceBlueprint } from '../types';
 
 type DialogShellProps = {
   readonly title: string;
@@ -109,26 +109,36 @@ export function SearchDialog({
 
 export function SettingsDialog({
   settings,
+  blueprints,
   dirty,
   notice,
   onSave,
   onLoad,
   onReset,
+  onSaveBlueprint,
+  onApplyBlueprint,
   onClose,
 }: {
   readonly settings: DashboardSettings;
+  readonly blueprints: readonly WorkspaceBlueprint[];
   readonly dirty: boolean;
   readonly notice: string;
   readonly onSave: () => void;
   readonly onLoad: () => void;
   readonly onReset: () => void;
+  readonly onSaveBlueprint: (name: string) => void;
+  readonly onApplyBlueprint: (name: string) => void;
   readonly onClose: () => void;
 }) {
+  const [blueprintName, setBlueprintName] = useState('');
+  const blueprintNameId = useId();
+  const trimmedName = blueprintName.trim();
+
   return (
     <DialogShell title="工作区设置" eyebrow="LOCAL WORKSPACE" onClose={onClose}>
       <div className="settings-summary">
-        <div><span>图表布局</span><strong className="numeric">{settings.layout} 格 / {settings.panels.length} 面板</strong></div>
-        <div><span>市场</span><strong>{settings.market === 'spot' ? '现货' : 'USDⓈ-M 永续'}</strong></div>
+        <div><span>自定义工作区</span><strong className="numeric">{settings.widgets.length} 组件 / {settings.panels.length} 图表</strong></div>
+        <div><span>图表市场</span><strong>{settings.market === 'spot' ? '现货' : 'USDⓈ-M 永续'}</strong></div>
         <div><span>外观</span><strong>{settings.theme === 'dark' ? '深色' : '浅色'}</strong></div>
         <div><span>保存位置</span><strong>当前浏览器 localStorage</strong></div>
       </div>
@@ -141,10 +151,61 @@ export function SettingsDialog({
         <button type="button" className="button" onClick={onLoad}><FolderOpen />读取保存</button>
         <button type="button" className="button button--danger" onClick={onReset}><RotateCcw />恢复默认</button>
       </div>
+      <section className="blueprint-section">
+        <h3>命名蓝图</h3>
+        <p className="blueprint-description" id={`${blueprintNameId}-description`}>
+          将当前全部组件、桌面位置、尺寸、显隐和指标保存为可重复应用的版本。
+        </p>
+        <form
+          className="blueprint-save"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (trimmedName.length > 0) onSaveBlueprint(trimmedName);
+          }}
+        >
+          <label htmlFor={blueprintNameId}>蓝图名称</label>
+          <div className="blueprint-save__row">
+            <input
+              id={blueprintNameId}
+              value={blueprintName}
+              onChange={(event) => setBlueprintName(event.target.value)}
+              aria-describedby={`${blueprintNameId}-description`}
+              autoComplete="off"
+              maxLength={40}
+              required
+            />
+            <button type="submit" className="button button--primary" disabled={trimmedName.length === 0} aria-label="保存命名蓝图">
+              <Save />保存蓝图
+            </button>
+          </div>
+        </form>
+        {blueprints.length === 0 ? (
+          <p className="blueprint-empty">还没有命名蓝图。输入名称并保存后，可从这里一键应用。</p>
+        ) : (
+          <ul className="blueprint-list" aria-label="已保存的命名蓝图">
+            {blueprints.map((blueprint) => (
+              <li key={blueprint.name}>
+                <span className="blueprint-list__meta">
+                  <strong>{blueprint.name}</strong>
+                  <span className="numeric">{blueprint.settings.widgets.length} 组件 · {blueprint.settings.panels.length} 图表</span>
+                </span>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => onApplyBlueprint(blueprint.name)}
+                  aria-label={`应用蓝图 ${blueprint.name}`}
+                >
+                  应用
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <p className="dialog__footnote" aria-live="polite">{notice}</p>
       <div className="settings-note">
         <strong>仅本机持久化</strong>
-        <p>保存后刷新页面会自动恢复。响应式旋转或打开盘口抽屉不会覆盖桌面布局。清除浏览器站点数据会删除保存内容。</p>
+        <p>当前工作区与命名蓝图分别保存，刷新后可读取。窄屏单列预览不会改写桌面位置；清除浏览器站点数据会同时删除两者。</p>
       </div>
     </DialogShell>
   );
@@ -155,13 +216,22 @@ export function HelpDialog({ onClose }: { readonly onClose: () => void }) {
     <DialogShell title="操作指南" eyebrow="DEMO PLAYBOOK" onClose={onClose}>
       <div className="help-content">
         <section>
-          <h3>现在可以试</h3>
+          <h3>自定义工作区</h3>
           <ul>
-            <li><strong>多图看盘</strong><span>切换 1 / 2 / 4 / 6 格，添加或移除面板；单图放大后按 Esc 返回。</span></li>
-            <li><strong>独立周期与指标</strong><span>每个面板可选 1m–1d；工具栏为当前面板切换 SMA20、EMA50、RSI14 和成交量。</span></li>
-            <li><strong>图表交互</strong><span>滚轮或双指缩放，拖动平移；普通模拟 tick 不会重置你的可视范围。</span></li>
-            <li><strong>市场检查器</strong><span>点击面板或自选列表更新右侧订单簿与累计深度；移动端从“盘口”按钮打开。</span></li>
-            <li><strong>本地工作区</strong><span>保存市场、主题、布局、面板与指标；刷新后自动恢复，也可读取或重置。</span></li>
+            <li><strong>拖动与调整尺寸</strong><span>桌面点击“编辑布局”解锁后，按住组件顶部抓手拖动，使用右下角手柄调整尺寸；点击“锁定布局”结束编辑。</span></li>
+            <li><strong>图表与研究高度</strong><span>纯图表默认占 6 行；启用 RSI 14 或 CCI 20 后，该图表自动扩展为 12 行研究高度，并为其他组件重新排开位置。</span></li>
+            <li><strong>隐藏与恢复</strong><span>组件顶部的隐藏按钮只改变显隐，不删除配置。工作区上方会出现恢复栏，可逐个找回隐藏组件。</span></li>
+            <li><strong>独立市场组件</strong><span>盘口与累计深度各自选择标的和市场，不跟随当前图表；点击自选列表中的标的会切换当前图表。</span></li>
+            <li><strong>命名蓝图</strong><span>在设置中输入名称即可保存全部组件、位置、尺寸、显隐与指标；从蓝图列表点击“应用”即可恢复该版本。</span></li>
+          </ul>
+        </section>
+        <section>
+          <h3>图表与移动操作</h3>
+          <ul>
+            <li><strong>独立周期与指标</strong><span>每个图表可选 1m–1d；工具栏为当前图表切换 SMA 20、EMA 50、RSI 14、CCI 20 和成交量。</span></li>
+            <li><strong>图表交互</strong><span>滚轮或双指缩放，拖动平移；普通模拟 tick 不会重置可视范围。单图放大后按 Esc 返回。</span></li>
+            <li><strong>窄屏单列预览</strong><span>窄屏按桌面顺序单列显示，不提供拖动或缩放手柄。仍可调整标的、指标与显隐，桌面位置和命名蓝图不会被覆盖。</span></li>
+            <li><strong>本地工作区</strong><span>“保存工作区”和“读取保存”管理当前版本；“恢复默认”恢复混合预设并保留命名蓝图。</span></li>
           </ul>
         </section>
         <section>
@@ -169,8 +239,7 @@ export function HelpDialog({ onClose }: { readonly onClose: () => void }) {
           <div className="shortcut-grid">
             <span><kbd>Ctrl / ⌘ K</kbd>搜索标的</span>
             <span><kbd>P</kbd>暂停 / 继续模拟</span>
-            <span><kbd>1 / 2 / 4 / 6</kbd>切换布局</span>
-            <span><kbd>Esc</kbd>关闭浮层或放大</span>
+            <span><kbd>Esc</kbd>关闭对话框或退出单图放大</span>
           </div>
         </section>
         <section className="help-future">

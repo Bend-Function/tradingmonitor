@@ -1,202 +1,203 @@
 import { useMemo } from 'react';
-import { X } from 'lucide-react';
-import { formatPrice, getInstrument, INSTRUMENTS, makeBook } from '../market';
+import {
+  advanceBars,
+  formatPrice,
+  generateBars,
+  getInstrument,
+  INSTRUMENTS,
+  makeBook,
+} from '../market';
 import type { Market } from '../market';
-import type { PanelConfig } from '../types';
+import type { UtilityWidget } from '../types';
 
-const BOOK_ROWS = 8;
-const DEPTH_WIDTH = 280;
-const DEPTH_HEIGHT = 72;
-const DEPTH_PADDING = 4;
-const DEPTH_CENTER = DEPTH_WIDTH / 2;
-
-type QuantityLevel = {
-  readonly price: number;
-  readonly quantity: number;
-};
-
-export type InspectorProps = {
-  readonly panel: PanelConfig;
-  readonly market: Market;
-  readonly price: number;
+type UtilityWidgetProps = {
+  readonly widget: UtilityWidget;
   readonly tick: number;
-  readonly watchPrices: Readonly<Record<string, number>>;
-  readonly onClose: () => void;
-  readonly onSelectInstrument: (symbol: string) => void;
+  readonly onChange: (update: { readonly symbol?: string; readonly market?: Market }) => void;
 };
 
-function formatQuantity(quantity: number): string {
-  return quantity.toLocaleString('en-US', { maximumFractionDigits: 3 });
-}
-
-function signedPercent(value: number): string {
-  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
-}
-
-function cumulative(levels: readonly QuantityLevel[]): number[] {
-  let total = 0;
-  return levels.map((level) => {
-    total += level.quantity;
-    return total;
-  });
-}
-
-function depthPoints(totals: readonly number[], maximum: number, side: 'bid' | 'ask'): string {
-  return totals.map((total, index) => {
-    const distance = ((index + 1) / Math.max(totals.length, 1)) * (DEPTH_CENTER - DEPTH_PADDING);
-    const x = side === 'bid' ? DEPTH_CENTER - distance : DEPTH_CENTER + distance;
-    const y = DEPTH_HEIGHT - DEPTH_PADDING - (total / maximum) * (DEPTH_HEIGHT - DEPTH_PADDING * 2);
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join(' ');
-}
-
-function DepthChart({ bids, asks }: { readonly bids: readonly QuantityLevel[]; readonly asks: readonly QuantityLevel[] }) {
-  const bidTotals = cumulative(bids);
-  const askTotals = cumulative(asks);
-  const maximum = Math.max(bidTotals.at(-1) ?? 1, askTotals.at(-1) ?? 1, 1);
-  const bidPoints = depthPoints(bidTotals, maximum, 'bid');
-  const askPoints = depthPoints(askTotals, maximum, 'ask');
-  const bidArea = bidPoints.length > 0
-    ? `M ${DEPTH_CENTER} ${DEPTH_HEIGHT} L ${bidPoints} L ${DEPTH_PADDING} ${DEPTH_HEIGHT} Z`
-    : '';
-  const askArea = askPoints.length > 0
-    ? `M ${DEPTH_CENTER} ${DEPTH_HEIGHT} L ${askPoints} L ${DEPTH_WIDTH - DEPTH_PADDING} ${DEPTH_HEIGHT} Z`
-    : '';
+function SymbolMarketControls({ widget, onChange }: Pick<UtilityWidgetProps, 'widget' | 'onChange'>) {
   return (
-    <svg
-      className="depth-chart"
-      viewBox={`0 0 ${DEPTH_WIDTH} ${DEPTH_HEIGHT}`}
-      role="img"
-      aria-label="模拟买卖盘累计深度图，左侧为买盘，右侧为卖盘"
-      preserveAspectRatio="none"
-    >
-      <line x1={DEPTH_CENTER} x2={DEPTH_CENTER} y1={DEPTH_PADDING} y2={DEPTH_HEIGHT} className="depth-chart__mid" />
-      {bidArea && <path d={bidArea} className="depth-chart__bid-area" />}
-      {askArea && <path d={askArea} className="depth-chart__ask-area" />}
-      {bidPoints && <polyline points={bidPoints} className="depth-chart__bid-line" />}
-      {askPoints && <polyline points={askPoints} className="depth-chart__ask-line" />}
-    </svg>
+    <div className="utility-controls">
+      <label>
+        <span className="sr-only">组件标的</span>
+        <select
+          className="workspace-select numeric"
+          value={widget.symbol}
+          onChange={(event) => onChange({ symbol: event.target.value })}
+          aria-label="组件标的"
+        >
+          {INSTRUMENTS.map((instrument) => (
+            <option value={instrument.symbol} key={instrument.symbol}>{instrument.symbol}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span className="sr-only">组件市场</span>
+        <select
+          className="workspace-select"
+          value={widget.market}
+          onChange={(event) => onChange({ market: event.target.value as Market })}
+          aria-label="组件市场"
+        >
+          <option value="spot">现货</option>
+          <option value="usdm">U 本位</option>
+        </select>
+      </label>
+    </div>
   );
 }
 
-export function Inspector({
-  panel,
-  market,
-  price,
-  tick,
-  watchPrices,
-  onClose,
-  onSelectInstrument,
-}: InspectorProps) {
-  const instrument = getInstrument(panel.symbol);
+function useUtilityPrice(symbol: string, market: Market, tick: number): number {
+  return useMemo(() => {
+    const bars = advanceBars(generateBars(symbol, market, '1m', 90), symbol, tick, '1m');
+    return bars.at(-1)?.close ?? getInstrument(symbol).base;
+  }, [market, symbol, tick]);
+}
+
+function useUtilityBook(widget: UtilityWidget, tick: number) {
+  const price = useUtilityPrice(widget.symbol, widget.market, tick);
   const book = useMemo(() => makeBook(price, tick), [price, tick]);
-  const asks = book.asks.slice(0, BOOK_ROWS).reverse();
-  const bids = book.bids.slice(0, BOOK_ROWS);
-  const maxQuantity = Math.max(...asks.map((level) => level.quantity), ...bids.map((level) => level.quantity), 1);
-  const bestBid = book.bids[0]?.price ?? price;
-  const bestAsk = book.asks[0]?.price ?? price;
-  const bidShare = book.imbalance * 100;
+  return { book, price, instrument: getInstrument(widget.symbol) };
+}
+
+export function WatchlistWidget({ widget, tick, onChange }: UtilityWidgetProps) {
+  const prices = useMemo(() => Object.fromEntries(INSTRUMENTS.map((instrument) => {
+    const bars = advanceBars(generateBars(instrument.symbol, widget.market, '15m', 90), instrument.symbol, tick, '15m');
+    return [instrument.symbol, {
+      price: bars.at(-1)?.close ?? instrument.base,
+      change: instrument.change + (tick % 7 - 3) * 0.02,
+    }];
+  })), [tick, widget.market]);
 
   return (
-    <aside className="inspector" aria-label="市场观察与模拟盘口">
-      <div className="inspector__mobile-header">
-        <div>
-          <span className="section-eyebrow">MARKET INSPECTOR</span>
-          <h2>市场检查器</h2>
-        </div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="关闭市场检查器" title="关闭">
-          <X />
-        </button>
+    <section className="utility-widget watchlist-section" aria-label="独立自选列表">
+      <div className="utility-controls">
+        <span className="utility-controls__current numeric">{widget.symbol}</span>
+        <label>
+          <span className="sr-only">自选市场</span>
+          <select
+            className="workspace-select"
+            value={widget.market}
+            onChange={(event) => onChange({ market: event.target.value as Market })}
+            aria-label="自选市场"
+          >
+            <option value="spot">现货</option>
+            <option value="usdm">U 本位</option>
+          </select>
+        </label>
       </div>
+      <div className="watchlist">
+        {INSTRUMENTS.map((instrument) => {
+          const quote = prices[instrument.symbol];
+          return (
+            <button
+              type="button"
+              className={`watchlist-row${instrument.symbol === widget.symbol ? ' is-active' : ''}`}
+              key={instrument.symbol}
+              aria-pressed={instrument.symbol === widget.symbol}
+              aria-label={`在当前图表显示 ${instrument.name}`}
+              onClick={() => onChange({ symbol: instrument.symbol })}
+            >
+              <span className="watchlist-row__name">
+                <strong>{instrument.symbol}</strong>
+                <small>{instrument.name}</small>
+              </span>
+              <span className="watchlist-row__quote">
+                <strong>{formatPrice(quote.price)}</strong>
+                <small className={quote.change >= 0 ? 'positive' : 'negative'}>
+                  {quote.change >= 0 ? '+' : ''}{quote.change.toFixed(2)}%
+                </small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
-      <section className="inspector-section watchlist-section">
-        <div className="section-heading">
-          <h2>自选列表</h2>
-          <span className="numeric muted">06</span>
-        </div>
-        <div className="watchlist">
-          {INSTRUMENTS.map((item) => {
-            const active = item.symbol === panel.symbol;
-            return (
-              <button
-                type="button"
-                className={`watchlist-row${active ? ' is-active' : ''}`}
-                key={item.symbol}
-                onClick={() => onSelectInstrument(item.symbol)}
-                aria-pressed={active}
-                aria-label={`在当前面板显示 ${item.name}`}
-              >
-                <span className="watchlist-row__name">
-                  <strong className="numeric">{item.symbol}</strong>
-                  <small>{item.name}</small>
-                </span>
-                <span className="watchlist-row__quote numeric">
-                  <strong>{formatPrice(watchPrices[item.symbol] ?? item.base)}</strong>
-                  <small className={item.change >= 0 ? 'positive' : 'negative'}>{signedPercent(item.change)}</small>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="inspector-section instrument-inspector">
-        <div className="section-heading">
-          <div>
-            <span className="section-eyebrow">SELECTED / {market === 'spot' ? 'SPOT' : 'USDⓈ-M'}</span>
-            <h2 className="numeric">{instrument.symbol}</h2>
+export function OrderBookWidget({ widget, tick, onChange }: UtilityWidgetProps) {
+  const { book, price, instrument } = useUtilityBook(widget, tick);
+  const maximumQuantity = Math.max(
+    ...book.asks.slice(0, 7).map((level) => level.quantity),
+    ...book.bids.slice(0, 7).map((level) => level.quantity),
+  );
+  return (
+    <section className="utility-widget book-section" aria-label={`${widget.symbol} 独立盘口`}>
+      <SymbolMarketControls widget={widget} onChange={onChange} />
+      <div className="inspector-price">
+        <strong className="numeric">{formatPrice(price)}</strong>
+        <span className={instrument.change >= 0 ? 'positive' : 'negative'}>
+          {instrument.change >= 0 ? '+' : ''}{instrument.change.toFixed(2)}%
+        </span>
+        <small>{widget.market === 'spot' ? '现货' : 'U 本位'}独立报价</small>
+      </div>
+      <div className="book-head numeric"><span>价格(USDT)</span><span>数量({instrument.symbol.replace('USDT', '')})</span></div>
+      <div className="book-rows book-rows--asks">
+        {book.asks.slice(0, 7).reverse().map((level, index) => (
+          <div className="book-row numeric" key={`ask-${index}`}>
+            <div className="book-row__depth book-row__depth--ask" style={{ width: `${level.quantity / maximumQuantity * 100}%` }} />
+            <span className="negative">{formatPrice(level.price)}</span><span>{level.quantity.toFixed(3)}</span>
           </div>
-          <span className="badge badge--warning">模拟盘口</span>
-        </div>
-        <div className="inspector-price numeric">
-          <strong>{formatPrice(price)}</strong>
-          <span className={instrument.change >= 0 ? 'positive' : 'negative'}>{signedPercent(instrument.change)} <small>24h</small></span>
-        </div>
-      </section>
+        ))}
+      </div>
+      <div className="book-spread">
+        <strong className="numeric">{formatPrice(price)}</strong>
+        <span>价差 {formatPrice(book.asks[0].price - book.bids[0].price)}</span>
+      </div>
+      <div className="book-rows book-rows--bids">
+        {book.bids.slice(0, 7).map((level, index) => (
+          <div className="book-row numeric" key={`bid-${index}`}>
+            <div className="book-row__depth book-row__depth--bid" style={{ width: `${level.quantity / maximumQuantity * 100}%` }} />
+            <span className="positive">{formatPrice(level.price)}</span><span>{level.quantity.toFixed(3)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="imbalance-track" aria-label={`买方占比 ${(book.imbalance * 100).toFixed(1)}%`}>
+        <div className="imbalance-track__bid" style={{ width: `${book.imbalance * 100}%` }} />
+      </div>
+      <div className="imbalance-labels">
+        <span>买方 {(book.imbalance * 100).toFixed(1)}%</span>
+        <span>卖方 {((1 - book.imbalance) * 100).toFixed(1)}%</span>
+      </div>
+    </section>
+  );
+}
 
-      <section className="inspector-section depth-section">
-        <div className="section-heading">
-          <h2>累计深度</h2>
-          <span className="muted">10 档</span>
-        </div>
-        <DepthChart bids={book.bids.slice(0, 10)} asks={book.asks.slice(0, 10)} />
-        <div className="depth-labels numeric"><span className="positive">买盘</span><span className="negative">卖盘</span></div>
-        <div className="balance-label"><span>买盘占比</span><strong className="numeric">{bidShare.toFixed(1)}%</strong></div>
-        <div className="balance-bar" aria-label={`买盘占比 ${bidShare.toFixed(1)}%，卖盘占比 ${(100 - bidShare).toFixed(1)}%`}>
-          <span className="balance-bar__bid" style={{ width: `${bidShare}%` }} />
-          <span className="balance-bar__ask" style={{ width: `${100 - bidShare}%` }} />
-        </div>
-      </section>
-
-      <section className="inspector-section book-section">
-        <div className="section-heading">
-          <h2>订单簿</h2>
-          <span className="muted">8 档</span>
-        </div>
-        <div className="book-head numeric muted"><span>价格 (USDT)</span><span>数量</span></div>
-        <div className="book-rows book-rows--asks">
-          {asks.map((level) => (
-            <div className="book-row numeric" key={`ask-${level.price}`}>
-              <span className="book-row__depth book-row__depth--ask" style={{ width: `${(level.quantity / maxQuantity) * 100}%` }} />
-              <span className="negative">{formatPrice(level.price)}</span>
-              <span>{formatQuantity(level.quantity)}</span>
-            </div>
-          ))}
-        </div>
-        <div className="book-spread numeric">
-          <strong>{formatPrice(price)}</strong>
-          <span>价差 {formatPrice(bestAsk - bestBid)}</span>
-        </div>
-        <div className="book-rows book-rows--bids">
-          {bids.map((level) => (
-            <div className="book-row numeric" key={`bid-${level.price}`}>
-              <span className="book-row__depth book-row__depth--bid" style={{ width: `${(level.quantity / maxQuantity) * 100}%` }} />
-              <span className="positive">{formatPrice(level.price)}</span>
-              <span>{formatQuantity(level.quantity)}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-    </aside>
+export function DepthWidget({ widget, tick, onChange }: UtilityWidgetProps) {
+  const { book, price } = useUtilityBook(widget, tick);
+  let bidQuantity = 0;
+  let askQuantity = 0;
+  const bids = book.bids.slice(0, 10).map((level) => (bidQuantity += level.quantity));
+  const asks = book.asks.slice(0, 10).map((level) => (askQuantity += level.quantity));
+  const maximumQuantity = Math.max(bidQuantity, askQuantity);
+  const bidPoints = bids.map((quantity, index) => (
+    `${150 - (index + 1) * 14},${104 - quantity / maximumQuantity * 96}`
+  )).join(' ');
+  const askPoints = asks.map((quantity, index) => (
+    `${150 + (index + 1) * 14},${104 - quantity / maximumQuantity * 96}`
+  )).join(' ');
+  return (
+    <section className="utility-widget depth-section" aria-label={`${widget.symbol} 独立深度`}>
+      <SymbolMarketControls widget={widget} onChange={onChange} />
+      <div className="section-heading">
+        <h2>累计深度</h2>
+        <span className="numeric">中价 {formatPrice(price)}</span>
+      </div>
+      <div className="depth-chart">
+        <svg viewBox="0 0 300 112" preserveAspectRatio="none" aria-label="模拟订单数量累计深度图" role="img">
+          {[28, 56, 84].map((y) => <line className="chart-grid-line" key={y} x1="0" y1={y} x2="300" y2={y} />)}
+          <polygon className="depth-chart__bid-area" points={`150,104 ${bidPoints} 10,104`} />
+          <polygon className="depth-chart__ask-area" points={`150,104 ${askPoints} 290,104`} />
+          <polyline className="depth-chart__bid-line" points={`150,104 ${bidPoints}`} />
+          <polyline className="depth-chart__ask-line" points={`150,104 ${askPoints}`} />
+          <line className="depth-chart__mid" x1="150" y1="8" x2="150" y2="104" />
+        </svg>
+      </div>
+      <div className="depth-labels numeric"><span>买盘 {book.imbalance.toFixed(2)}</span><span>卖盘 {(1 - book.imbalance).toFixed(2)}</span></div>
+      <div className="imbalance-track"><div className="imbalance-track__bid" style={{ width: `${book.imbalance * 100}%` }} /></div>
+      <div className="imbalance-labels"><span>买方 {(book.imbalance * 100).toFixed(1)}%</span><span>卖方 {((1 - book.imbalance) * 100).toFixed(1)}%</span></div>
+    </section>
   );
 }
