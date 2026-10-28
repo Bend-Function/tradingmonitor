@@ -133,8 +133,27 @@ describe('indicators', () => {
     const bars = sequence(Array.from({ length: 14 }, (_, index) => index + 1));
     // When computing indicators.
     const result = indicators(bars);
-    // Then none of the three indicators has sufficient observations.
-    expect(result).toEqual({ sma: [], ema: [], rsi: [] });
+    // Then none of the indicators has sufficient observations.
+    expect(result).toEqual({ sma: [], ema: [], rsi: [], cci: [] });
+  });
+
+  it('calculates CCI20 from typical prices after twenty observations', () => {
+    const bars = sequence(Array.from({ length: 25 }, (_, index) => index + 1));
+    const { cci } = indicators(bars);
+    expect(cci).toHaveLength(6);
+    expect(cci[0]?.time).toBe(bars[19]?.time);
+    for (const point of cci) expect(point.value).toBeCloseTo(126.66666666666667, 10);
+  });
+
+  it('uses high and low as well as close for CCI20', () => {
+    const bars = sequence(Array.from({ length: 20 }, (_, index) => index + 1));
+    bars[19] = { ...bars[19], high: 80, low: 20 };
+    expect(indicators(bars).cci[0]?.value).toBeCloseTo(28.5 / (0.015 * 6.05), 10);
+  });
+
+  it('returns finite zero CCI for flat fractional prices', () => {
+    const bars = sequence(Array.from({ length: 24 }, () => 0.1));
+    expect(indicators(bars).cci.map((point) => point.value)).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('reports RSI100 for a consistently rising sequence', () => {

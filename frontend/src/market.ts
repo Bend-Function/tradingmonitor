@@ -114,10 +114,12 @@ export function advanceBars(
 
 type Point = { time: number; value: number };
 
-export function indicators(bars: readonly Bar[]): { sma: Point[]; ema: Point[]; rsi: Point[] } {
+export function indicators(bars: readonly Bar[]): { sma: Point[]; ema: Point[]; rsi: Point[]; cci: Point[] } {
   const sma: Point[] = [];
   const ema: Point[] = [];
   const rsi: Point[] = [];
+  const cci: Point[] = [];
+  const typicalPrices: number[] = [];
   let smaSum = 0;
   let emaSum = 0;
   let emaValue = 0;
@@ -125,6 +127,15 @@ export function indicators(bars: readonly Bar[]): { sma: Point[]; ema: Point[]; 
   let loss = 0;
   let previous: Bar | undefined;
   for (const [index, bar] of bars.entries()) {
+    typicalPrices.push((bar.high + bar.low + bar.close) / 3);
+    if (typicalPrices.length > 20) typicalPrices.shift();
+    if (typicalPrices.length === 20) {
+      const anchor = typicalPrices[0];
+      const mean = anchor + typicalPrices.reduce((sum, value) => sum + value - anchor, 0) / 20;
+      const deviation = typicalPrices.reduce((sum, value) => sum + Math.abs(value - mean), 0) / 20;
+      const typical = typicalPrices[19];
+      cci.push({ time: bar.time, value: deviation === 0 ? 0 : (typical - mean) / (0.015 * deviation) });
+    }
     smaSum += bar.close;
     const expired = bars[index - 20];
     if (expired !== undefined) smaSum -= expired.close;
@@ -151,7 +162,7 @@ export function indicators(bars: readonly Bar[]): { sma: Point[]; ema: Point[]; 
     }
     previous = bar;
   }
-  return { sma, ema, rsi };
+  return { sma, ema, rsi, cci };
 }
 
 export function makeBook(price: number, tick: number): {
