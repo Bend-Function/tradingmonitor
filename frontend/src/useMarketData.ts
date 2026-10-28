@@ -12,6 +12,21 @@ export type PanelDataset = {
   readonly bars: readonly Bar[];
 };
 
+export function matchingDatasets(
+  panels: readonly Pick<PanelConfig, 'id' | 'symbol' | 'interval'>[],
+  market: Market,
+  datasets: Readonly<Record<string, PanelDataset>>,
+): Readonly<Record<string, PanelDataset>> {
+  const matching: Record<string, PanelDataset> = {};
+  for (const panel of panels) {
+    const dataset = datasets[panel.id];
+    if (dataset?.key === `${panel.symbol}:${market}:${panel.interval}`) {
+      matching[panel.id] = dataset;
+    }
+  }
+  return matching;
+}
+
 export function useMarketData(
   panels: readonly PanelConfig[],
   market: Market,
@@ -45,7 +60,7 @@ export function useMarketData(
     });
   }, [panels, market, tick]);
 
-  return datasets;
+  return matchingDatasets(panels, market, datasets);
 }
 
 export function useWatchlistPrices(market: Market, tick: number): Readonly<Record<string, number>> {
